@@ -26,7 +26,7 @@ class Controller(object):
             cherrypy.response.headers['Content-Type'] = 'application/x-bzip2'
 
         p = subprocess.Popen(['git', 'rev-list',
-                              '--min-age', timestamp.encode('utf-8'),
+                              '--min-age=%s' % timestamp.encode('utf-8'),
                               '-1',
                               'HEAD'],
                              stdout=subprocess.PIPE,
