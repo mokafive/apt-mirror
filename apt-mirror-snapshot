@@ -1,0 +1,88 @@
+#!/usr/bin/python
+
+import fcntl
+import os
+import subprocess
+import sys
+import urlparse
+
+DISTS_MIRROR = "rsync://archive.ubuntu.com/ubuntu/dists/"
+DIR = os.path.abspath(os.path.dirname(__file__))
+
+DISTS_DIR = os.path.join(DIR, "dists")
+
+###
+#
+# snapshot: If changed, take a new snapshot of the mirror's dists/
+# directory
+def main(args):
+    with open(os.path.join(DIR, 'dists.lock'), 'w') as lock:
+        fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        p = subprocess.Popen(['date', '+%z'], stdout=subprocess.PIPE)
+        TZ, _ = p.communicate()
+
+        if not os.path.exists(DISTS_DIR):
+            subprocess.check_call(['git', 'init', DISTS_DIR])
+            with open(os.path.join(DISTS_DIR, '.gitignore'), 'w') as f:
+                f.write('*.gz\n*.bz2\n')
+            subprocess.check_call(['git', 'add', '.gitignore'],
+                                  cwd=DISTS_DIR)
+            subprocess.check_call(['git', 'commit',
+                                   '-m', 'Initial commit',
+                                   '--date', '1970-01-01 00:00:00'],
+                                  cwd=DISTS_DIR)
+
+        subprocess.check_call(['rsync', '-aP',
+                               '--delete',
+                               '--exclude=.git',
+                               '--exclude=.gitignore',
+                               '--exclude=installer-*',
+                               '--exclude=i18n',
+                               DISTS_MIRROR,
+                               DISTS_DIR])
+
+        newest_timestamp = 0
+        for root, dirs, files in os.walk(DISTS_DIR):
+            if '.git' in dirs:
+                dirs.remove('.git')
+
+            for f in files:
+                newest_timestamp = max(newest_timestamp,
+                                       os.stat(os.path.join(root, f)).st_mtime)
+
+        for root, dirs, files in os.walk(DISTS_DIR):
+            if '.git' in dirs:
+                dirs.remove('.git')
+            for f in files:
+                if f.endswith('.bz2'):
+                    uncompressed = f[:-len('.bz2')]
+                    if not os.path.exists(os.path.join(root, uncompressed)):
+                        subprocess.check_call(['bunzip2', '-c'],
+                                              stdin=open(os.path.join(root, f)),
+                                              stdout=open(os.path.join(root, uncompressed), 'w'))
+                if f.endswith('.gz'):
+                    uncompressed = f[:-len('.gz')]
+                    if not os.path.exists(os.path.join(root, uncompressed)):
+                        subprocess.check_call(['gunzip', '-c'],
+                                              stdin=open(os.path.join(root, f)),
+                                              stdout=open(os.path.join(root, uncompressed), 'w'))
+
+        subprocess.check_call(['git', 'add', '-A'],
+                              cwd=DISTS_DIR)
+
+        if 1 == subprocess.call(['git', 'diff-index',
+                                 '--cached',
+                                 '--quiet',
+                                 'HEAD'],
+                                cwd=DISTS_DIR):
+            env = dict(os.environ)
+            env['GIT_AUTHOR_DATE'] = '%s %s' % (newest_timestamp, TZ)
+            env['GIT_COMMITTER_DATE'] = '%s %s' % (newest_timestamp, TZ)
+            subprocess.check_call(['git', 'commit',
+                                   '-m', 'Auto-generated commit'],
+                                  cwd=DISTS_DIR,
+                                  env=env)
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

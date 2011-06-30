@@ -1,0 +1,149 @@
+#!/usr/bin/python
+
+import fcntl
+import hashlib
+import mimetypes
+import os
+import Queue
+import select
+import subprocess
+import tempfile
+
+import cherrypy
+import pycurl
+
+DIR = os.path.abspath(os.path.dirname(__file__))
+
+DISTS_DIR = os.path.join(DIR, "dists")
+CACHE_DIR = os.path.join(DIR, "cache")
+
+class Controller(object):
+    def dists(self, timestamp, path):
+        cherrypy.response.headers['Content-Type'] = 'text/plain'
+        if path.endswith('.gz'):
+            cherrypy.response.headers['Content-Type'] = 'application/x-gzip'
+        elif path.endswith('.bz2'):
+            cherrypy.response.headers['Content-Type'] = 'application/x-bzip2'
+
+        p = subprocess.Popen(['git', 'rev-list',
+                              '--min-age', timestamp.encode('utf-8'),
+                              '-1',
+                              'HEAD'],
+                             stdout=subprocess.PIPE,
+                             cwd=DISTS_DIR)
+        commit, _ = p.communicate()
+        commit = commit.strip()
+
+        if not commit:
+            raise cherrypy.HTTPError(404)
+
+        try:
+            return subprocess.check_output(['git', 'cat-file',
+                                            'blob',
+                                            '%s:%s' % (commit, path)],
+                                           cwd=DISTS_DIR)
+        except subprocess.CalledProcessError:
+            try:
+                if path.endswith('.gz'):
+                    p = subprocess.Popen(['git', 'cat-file',
+                                          'blob',
+                                          '%s:%s' % (commit, path[:-len('.gz')])],
+                                         cwd=DISTS_DIR,
+                                         stdout=subprocess.PIPE)
+                    return subprocess.check_output(['gzip', '-cn9'],
+                                                   stdin=p.stdout)
+
+                if path.endswith('.bz2'):
+                    p = subprocess.Popen(['git', 'cat-file',
+                                          'blob',
+                                          '%s:%s' % (commit, path[:-len('.bz2')])],
+                                         cwd=DISTS_DIR,
+                                         stdout=subprocess.PIPE)
+                    return subprocess.check_output(['bzip2', '-c9'],
+                                                   stdin=p.stdout)
+            except subprocess.CalledProcessError:
+                pass # fall down to next line
+
+            raise cherrypy.HTTPError(404)
+
+    def pool(self, filename, **kwargs):
+        t = mimetypes.guess_type(filename)
+        cherrypy.response.headers['Content-Type'] = t[0] or 'text/plain'
+
+        h = hashlib.sha1(filename).hexdigest()
+
+        cache_path = os.path.join(CACHE_DIR, h[0], h[1], h[2:])
+        if not os.path.exists(os.path.dirname(cache_path)):
+            os.makedirs(os.path.dirname(cache_path))
+
+        if os.path.exists(cache_path):
+            for l in  open(cache_path, 'rb'):
+                yield l
+        else:
+            with tempfile.NamedTemporaryFile(dir=os.path.dirname(cache_path),
+                                             prefix=(os.path.basename(cache_path) + '.'),
+                                             delete=False) as f:
+                url = 'https://launchpad.net/ubuntu/+archive/primary/+files/' + filename.encode('utf-8')
+
+                q = Queue.Queue()
+                m = pycurl.CurlMulti()
+                c = pycurl.Curl()
+
+                c.setopt(pycurl.URL, url)
+                c.setopt(pycurl.FOLLOWLOCATION, 1)
+                c.setopt(pycurl.FAILONERROR, 1)
+
+                def write(data):
+                    q.put(data)
+                    f.write(data)
+                c.setopt(pycurl.WRITEFUNCTION, write)
+
+                m.add_handle(c)
+
+                while True:
+                    ret, num_handles = m.perform()
+                    while not q.empty():
+                        yield q.get()
+
+                    if not num_handles:
+                        break
+
+                    select.select(*m.fdset())
+
+                f.close()
+
+                if c.getinfo(pycurl.HTTP_CODE) == 404:
+                    os.unlink(f.name)
+                    raise cherrypy.HTTPError(404)
+                else:
+                    os.rename(f.name, cache_path)
+
+    def catchall(self, **kwargs):
+        return ("Hello. It looks like you're trying to browse the Ubuntu apt "
+                "mirror. Don't do that")
+
+d = cherrypy.dispatch.RoutesDispatcher()
+c = Controller()
+d.connect('dists',
+          '/{timestamp}/dists/{path:.*?}',
+          c,
+          action='dists')
+d.connect('pool',
+          '/{timestamp}/pool/{component}/{prefix:(lib)?[a-z]}/{spackage}/{filename}',
+          c,
+          action='pool')
+d.connect('catchall',
+          '/{path:.*?}',
+          c,
+          action='catchall')
+
+conf = {
+    '/': {'request.dispatch': d},
+    }
+
+if __name__ == '__main__':
+    cherrypy.config.update({'server.socket_host': '0.0.0.0',
+                            'server.socket_port': '9999',
+                            'log.screen': True})
+    app = cherrypy.tree.mount(None, config=conf)
+    cherrypy.server.start()

@@ -1,0 +1,18 @@
+apt-mirror requires:
+ - python2.7
+ - git
+ - rsync
+ - python-cherrypy3
+ - python-pycurl
+ - a filesystem with atime
+
+To install:
+ - Setup a cron job to run apt-mirror-snapshot. Should ideally be run hourly
+ - Setup a cron job to run apt-mirror-cleanup. Should be run daily or weekly
+ - Configure apt-mirror-web to run at boot. It doesn't daemonize. Example Upstart job:
+
+# cat /etc/init/apt-mirror.conf
+
+start on networking and filesystem
+stop on runlevel [016]
+exec /path/to/apt-mirror-web
