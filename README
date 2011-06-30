@@ -4,6 +4,7 @@ apt-mirror requires:
  - rsync
  - python-cherrypy3
  - python-pycurl
+ - python-routes
  - a filesystem with atime
 
 To install:
