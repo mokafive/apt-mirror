@@ -118,7 +118,10 @@ class Controller(object):
                 m.add_handle(c)
 
                 while True:
-                    ret, num_handles = m.perform()
+                    while True:
+                        ret, num_handles = m.perform()
+                        if ret != pycurl.E_CALL_MULTI_PERFORM:
+                            break
                     while not q.empty():
                         yield q.get()
 
