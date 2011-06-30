@@ -1,5 +1,5 @@
 apt-mirror requires:
- - python2.7
+ - python2.6
  - git
  - rsync
  - python-cherrypy3

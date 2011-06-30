@@ -17,6 +17,19 @@ DIR = os.path.abspath(os.path.dirname(__file__))
 DISTS_DIR = os.path.join(DIR, "dists")
 CACHE_DIR = os.path.join(DIR, "cache")
 
+def check_output(*popenargs, **kwargs):
+    if 'stdout' in kwargs:
+        raise ValueError('stdout argument not allowed, it will be overridden.')
+    process = subprocess.Popen(stdout=PIPE, *popenargs, **kwargs)
+    output, unused_err = process.communicate()
+    retcode = process.poll()
+    if retcode:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = popenargs[0]
+        raise CalledProcessError(retcode, cmd, output=output)
+    return output
+
 class Controller(object):
     def dists(self, timestamp, path):
         cherrypy.response.headers['Content-Type'] = 'text/plain'
@@ -38,10 +51,10 @@ class Controller(object):
             raise cherrypy.HTTPError(404)
 
         try:
-            return subprocess.check_output(['git', 'cat-file',
-                                            'blob',
-                                            '%s:%s' % (commit, path)],
-                                           cwd=DISTS_DIR)
+            return check_output(['git', 'cat-file',
+                                 'blob',
+                                 '%s:%s' % (commit, path)],
+                                cwd=DISTS_DIR)
         except subprocess.CalledProcessError:
             try:
                 if path.endswith('.gz'):
@@ -50,8 +63,8 @@ class Controller(object):
                                           '%s:%s' % (commit, path[:-len('.gz')])],
                                          cwd=DISTS_DIR,
                                          stdout=subprocess.PIPE)
-                    return subprocess.check_output(['gzip', '-cn9'],
-                                                   stdin=p.stdout)
+                    return check_output(['gzip', '-cn9'],
+                                        stdin=p.stdout)
 
                 if path.endswith('.bz2'):
                     p = subprocess.Popen(['git', 'cat-file',
@@ -59,8 +72,8 @@ class Controller(object):
                                           '%s:%s' % (commit, path[:-len('.bz2')])],
                                          cwd=DISTS_DIR,
                                          stdout=subprocess.PIPE)
-                    return subprocess.check_output(['bzip2', '-c9'],
-                                                   stdin=p.stdout)
+                    return check_output(['bzip2', '-c9'],
+                                        stdin=p.stdout)
             except subprocess.CalledProcessError:
                 pass # fall down to next line
 
