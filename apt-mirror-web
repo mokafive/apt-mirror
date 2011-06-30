@@ -86,8 +86,11 @@ class Controller(object):
         h = hashlib.sha1(filename).hexdigest()
 
         cache_path = os.path.join(CACHE_DIR, h[0], h[1], h[2:])
-        if not os.path.exists(os.path.dirname(cache_path)):
+        try:
             os.makedirs(os.path.dirname(cache_path))
+        except OSError, e:
+            if e.errno != errno.EEXIST:
+                raise
 
         if os.path.exists(cache_path):
             for l in  open(cache_path, 'rb'):
