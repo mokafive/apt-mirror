@@ -18,18 +18,17 @@ DIR = os.path.abspath(os.path.dirname(__file__))
 DISTS_DIR = os.path.join(DIR, "dists")
 CACHE_DIR = os.path.join(DIR, "cache")
 
-def check_output(*popenargs, **kwargs):
-    if 'stdout' in kwargs:
-        raise ValueError('stdout argument not allowed, it will be overridden.')
-    process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
-    output, unused_err = process.communicate()
-    retcode = process.poll()
-    if retcode:
-        cmd = kwargs.get("args")
-        if cmd is None:
-            cmd = popenargs[0]
-        raise subprocess.CalledProcessError(retcode, cmd)
-    return output
+def cat_blob(obj):
+    try:
+        subprocess.check_call(['git', 'cat-file', '-e', obj],
+                              cwd=DISTS_DIR)
+        return subprocess.Popen(['git', 'cat-file',
+                                 'blob',
+                                 obj],
+                                cwd=DISTS_DIR,
+                                stdout=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        raise cherrypy.HTTPError(404)
 
 class Controller(object):
     def dists(self, timestamp, path):
@@ -52,31 +51,18 @@ class Controller(object):
             raise cherrypy.HTTPError(404)
 
         try:
-            return check_output(['git', 'cat-file',
-                                 'blob',
-                                 '%s:%s' % (commit, path)],
-                                cwd=DISTS_DIR)
-        except subprocess.CalledProcessError:
-            try:
-                if path.endswith('.gz'):
-                    p = subprocess.Popen(['git', 'cat-file',
-                                          'blob',
-                                          '%s:%s' % (commit, path[:-len('.gz')])],
-                                         cwd=DISTS_DIR,
-                                         stdout=subprocess.PIPE)
-                    return check_output(['gzip', '-cn9'],
-                                        stdin=p.stdout)
-
-                if path.endswith('.bz2'):
-                    p = subprocess.Popen(['git', 'cat-file',
-                                          'blob',
-                                          '%s:%s' % (commit, path[:-len('.bz2')])],
-                                         cwd=DISTS_DIR,
-                                         stdout=subprocess.PIPE)
-                    return check_output(['bzip2', '-c9'],
-                                        stdin=p.stdout)
-            except subprocess.CalledProcessError:
-                pass # fall down to next line
+            return cat_blob('%s:%s' % (commit, path)).stdout
+        except cherrypy.HTTPError:
+            if path.endswith('.gz'):
+                p = cat_blob('%s:%s' % (commit, path[:-len('.gz')]))
+                return subprocess.Popen(['gzip', '-cn9'],
+                                        stdin=p.stdout,
+                                        stdout=subprocess.PIPE).stdout
+            if path.endswith('.bz2'):
+                p = cat_blob('%s:%s' % (commit, path[:-len('.bz2')]))
+                return subprocess.Popen(['bzip2', '-c9'],
+                                        stdin=p.stdout,
+                                        stdout=subprocess.PIPE).stdout
 
             raise cherrypy.HTTPError(404)
 
