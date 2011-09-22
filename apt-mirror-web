@@ -116,14 +116,13 @@ class Controller(object):
 
                     select.select(*m.fdset())
 
-                f.close()
-
                 if c.getinfo(pycurl.HTTP_CODE) == 404:
                     os.unlink(f.name)
                     raise cherrypy.HTTPError(404)
                 else:
                     f.flush()
                     os.fsync(f.fileno())
+                    f.close()
                     os.rename(f.name, cache_path)
 
     def catchall(self, **kwargs):
