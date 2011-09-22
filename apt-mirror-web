@@ -122,6 +122,8 @@ class Controller(object):
                     os.unlink(f.name)
                     raise cherrypy.HTTPError(404)
                 else:
+                    f.flush()
+                    os.fsync(f.fileno())
                     os.rename(f.name, cache_path)
 
     def catchall(self, **kwargs):
