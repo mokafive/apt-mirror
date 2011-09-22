@@ -1,0 +1,75 @@
+#!/usr/bin/python
+
+import hashlib
+import os
+import subprocess
+import sys
+
+from debian_bundle import deb822
+
+DIR = os.path.abspath(os.path.dirname(__file__))
+
+DISTS_DIR = os.path.join(DIR, "dists")
+CACHE_DIR = os.path.join(DIR, "cache")
+
+def cat_blob(obj):
+    try:
+        subprocess.check_call(['git', 'cat-file', '-e', obj],
+                              cwd=DISTS_DIR)
+        return subprocess.Popen(['git', 'cat-file',
+                                 'blob',
+                                 obj],
+                                cwd=DISTS_DIR,
+                                stdout=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        raise Exception('Unable to cat file %s' % obj)
+
+def walk(ts):
+    p = subprocess.Popen(['git', 'rev-list',
+                          '--min-age=%s' % ts.encode('utf-8'),
+                          '-1',
+                          'HEAD'],
+                         stdout=subprocess.PIPE,
+                         cwd=DISTS_DIR)
+    commit, _ = p.communicate()
+    commit = commit.strip()
+
+    if not commit:
+        raise Exception('Invalid timestamp')
+
+    p = subprocess.Popen(['git', 'ls-tree',
+                          '--name-only',
+                          commit],
+                         stdout=subprocess.PIPE,
+                         cwd=DISTS_DIR)
+    suites, _ = p.communicate()
+    suites = suites.strip().split()
+    suites.remove('.gitignore')
+
+    for suite in suites:
+        release = deb822.Release(cat_blob('%s:%s/Release' % (commit, suite)).stdout)
+
+        components = release['Components'].split()
+        arches = release['Architectures'].split()
+
+        for component in components:
+            for arch in arches:
+                print 'Checking %s:%s/%s/%s' % (commit, suite, component, arch)
+                for p in deb822.Packages.iter_paragraphs(cat_blob('%s:%s/%s/binary-%s/Packages' %
+                                                                  (commit, suite, component, arch)).stdout):
+                    f = hashlib.sha1(os.path.basename(p['Filename'])).hexdigest()
+                    p = os.path.join(CACHE_DIR, f[0], f[1], f[2:])
+                    if os.path.exists(p) and os.stat(p).st_size != p['Size']:
+                        print 'Purging %s' % p['Filename']
+                        os.unlink(p)
+
+def main(args):
+    if not args:
+        print >>sys.stderr, 'Usage: %s <timestamp> [<timestamp> ..]' % sys.argv[0]
+        return
+
+    for arg in args:
+        walk(arg)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
