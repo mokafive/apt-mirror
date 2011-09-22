@@ -55,13 +55,17 @@ def walk(ts):
         for component in components:
             for arch in arches:
                 print 'Checking %s:%s/%s/%s' % (commit, suite, component, arch)
-                for p in deb822.Packages.iter_paragraphs(cat_blob('%s:%s/%s/binary-%s/Packages' %
-                                                                  (commit, suite, component, arch)).stdout):
-                    f = hashlib.sha1(os.path.basename(p['Filename'])).hexdigest()
-                    p = os.path.join(CACHE_DIR, f[0], f[1], f[2:])
-                    if os.path.exists(p) and os.stat(p).st_size != p['Size']:
-                        print 'Purging %s' % p['Filename']
-                        os.unlink(p)
+                try:
+                    for p in deb822.Packages.iter_paragraphs(cat_blob('%s:%s/%s/binary-%s/Packages' %
+                                                                      (commit, suite, component, arch)).stdout):
+                        f = hashlib.sha1(os.path.basename(p['Filename'])).hexdigest()
+                        p = os.path.join(CACHE_DIR, f[0], f[1], f[2:])
+                        if os.path.exists(p) and os.stat(p).st_size != p['Size']:
+                            print 'Purging %s' % p['Filename']
+                            os.unlink(p)
+                except:
+                    print 'Packages file unavailable'
+                    continue
 
 def main(args):
     if not args:
