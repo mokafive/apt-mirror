@@ -1,3 +1,41 @@
+apt-mirror - snapshotting apt mirror for Ubuntu
+
+apt-mirror is a snapshotting / "time-travelling" mirror for the Ubuntu
+archive, using the Launchpad Librarian interface to access old packages.
+We (MokaFive) developed it to allow us to effectively freeze the Ubuntu
+archive when we had a release branch for our product cycle, so that
+further SRUs would not impact our release unless manually overriden.
+This also allows us to build old release branches from any point (for
+point releases of our product) without incorporating the Ubuntu updates
+since that point.
+
+To use the mirror to see the repository as of a certain time, simply
+access the web server with the first path component being the UNIX time
+stamp of the desired date. The server will serve the most recent
+snapshotted metadata as of that date. For instance, to access the Ubuntu
+archive as of January 1, 2012, use a sources.list line like
+
+   deb http://apt-mirror:9999/1325376000/ oneiric main universe
+
+The original metadata files are signed by Ubuntu, so this does not
+require adding a different apt key.
+
+It consists of two main parts:
+ - a cronjob, apt-mirror-snapshot, to copy archive metadata (packages
+   and release files) into a git repository, so that they can be
+   retrieved later by date
+ - a web server, apt-mirror-web, to serve the archive metadata as of a
+   certain requested date, and serve the actual packages referenced by
+   that metadata by acting as a caching proxy to the Launchpad Librarian.
+
+There is also a cron job to clean up cached packages that have not been
+accessed recently.
+
+Note that the git repository of metadata can get very large over a long
+period of snapshotting, even with git's compression. MokaFive has five
+gigabytes of archives dating from June 2011; if you are interested,
+contact opensource@mokafive.com.
+
 apt-mirror requires:
  - python2.6
  - git
